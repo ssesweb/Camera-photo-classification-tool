@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>相机照片分类工具</title>
+    <meta name="description" content="专业相机照片分类工具，支持JPG、RAW及多种专业格式（CR2/CR3/NEF/ARW/RAF/ORF/RW2），提供智能文件管理与预览功能">
+    <meta name="keywords" content="照片分类,RAW处理,相机文件管理,JPG转换,摄影工作流">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>相机照片分类工具</h1>        
+        <h2 style="margin: 0; padding: 0;">
+            <a href="https://github.com/ssesweb" target="_blank" style="color: #007bff; text-decoration: none;">Quiet Phoenix</a>
+          </h2>
+          
+        <div class="upload-area" id="dropArea">
+            <div class="upload-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="17 8 12 3 7 8"></polyline>
+                    <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+            </div>
+            <p>拖拽照片到这里或<label for="fileInput" class="file-label">选择文件</label></p>
+            <input type="file" id="fileInput" multiple accept=".jpg,.jpeg,.cr2,.cr3,.nef,.arw,.raf,.orf,.rw2,.raw" style="display:none">
+        </div>
+
+        <div class="controls">
+            <div class="stats">
+                <span id="fileCount">0</span> 个文件已加载 (<span id="jpgCount">0</span> JPG, <span id="rawCount">0</span> RAW)
+            </div>
+            <div class="buttons">
+                <button id="selectAllBtn">全选</button>
+                <button id="deselectAllBtn">取消全选</button>
+                <button id="downloadJpgBtn" disabled>下载JPG压缩包</button>
+                <button id="downloadRawBtn" disabled>下载RAW压缩包</button>
+                <button id="clearAllBtn">清空</button>
+            </div>
+        </div>
+        
+        <!-- 添加进度条容器 -->
+        <div id="progressContainer" class="progress-container" style="display: none;">
+            <div class="progress-info">
+                <span id="progressText">准备下载...</span>
+                <span id="progressPercent">0%</span>
+            </div>
+            <div class="progress-bar-container">
+                <div id="progressBar" class="progress-bar"></div>
+            </div>
+        </div>
+
+        <div class="preview-container">
+            <div class="preview-header">
+                <h2>预览</h2>
+                <div class="preview-controls">
+                    <div class="view-mode">
+                        <label>视图模式：</label>
+                        <select id="viewModeSelect">
+                            <option value="grid">网格</option>
+                            <option value="adaptive" selected>自适应</option>
+                            <option value="square">方形</option>
+                        </select>
+                    </div>
+                    <div class="preview-size">
+                        <label>预览大小：</label>
+                        <div class="size-controls">
+                            <input type="range" id="previewSizeSlider" min="100" max="500" value="200" step="10">
+                            <div class="size-presets">
+                                <button class="size-preset" data-size="150">小</button>
+                                <button class="size-preset" data-size="200">中</button>
+                                <button class="size-preset" data-size="300">大</button>
+                            </div>
+                            <span id="previewSizeValue">200px</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="preview-grid" id="previewGrid"></div>
+        </div>
+    </div>
+
+    <div id="imageModal" class="modal">
+        <span class="close">&times;</span>
+        <div class="modal-controls">
+            <button id="zoomInBtn">放大</button>
+            <button id="zoomOutBtn">缩小</button>
+            <button id="resetZoomBtn">重置</button>
+        </div>
+        <img class="modal-content" id="modalImage">
+        <div id="modalCaption"></div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
