@@ -1,3 +1,12 @@
+// 辅助函数：格式化字节大小
+function formatBytes(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
 // 全局变量
 let allFiles = [];
 let selectedFiles = new Set();
@@ -30,7 +39,7 @@ const sizePresetBtns = document.querySelectorAll('.size-preset');
 
 // 预览设置
 let previewSettings = {
-    mode: 'adaptive',  // grid, adaptive, square
+    mode: 'adaptive',  // adaptive
     size: 200,     // 预览图片大小（像素）
     zoomLevel: 1   // 模态框缩放级别
 };
@@ -64,14 +73,28 @@ function initEventListeners() {
     clearAllBtn.addEventListener('click', clearAll);
     
     // 预览控制事件
-    viewModeSelect.addEventListener('change', updatePreviewMode);
+    // viewModeSelect.addEventListener('change', updatePreviewMode);
     previewSizeSlider.addEventListener('input', updatePreviewSize);
     
     // 预览大小预设按钮事件
     sizePresetBtns.forEach(btn => {
         btn.addEventListener('click', () => {
-            const size = parseInt(btn.dataset.size);
-            previewSizeSlider.value = size;
+            const ratio = parseFloat(btn.dataset.ratio);
+            // 临时设置预览模式为adaptive以获取正确的宽度基准
+            const originalMode = previewSettings.mode;
+            previewSettings.mode = 'adaptive';
+            previewGrid.classList.remove('square');
+            previewGrid.classList.add('adaptive');
+            // 获取预览网格的当前宽度
+            const previewGridWidth = previewGrid.offsetWidth;
+            // 恢复原始模式
+            previewSettings.mode = originalMode;
+            previewGrid.classList.remove('adaptive');
+            previewGrid.classList.add(originalMode);
+            // 根据比例计算新的预览大小
+            const newSize = Math.round(previewGridWidth * ratio);
+            // 将计算出的值设置到滑块，并确保在滑块的min/max范围内
+            previewSizeSlider.value = Math.max(parseInt(previewSizeSlider.min), Math.min(parseInt(previewSizeSlider.max), newSize));
             updatePreviewSize();
         });
     });
@@ -169,6 +192,15 @@ function updateFileStats() {
     fileCountEl.textContent = allFiles.length;
     jpgCountEl.textContent = jpgFiles.length;
     rawCountEl.textContent = rawFiles.length;
+
+    // 计算文件总大小
+    const totalSize = allFiles.reduce((sum, file) => sum + file.size, 0);
+    const jpgSize = jpgFiles.reduce((sum, file) => sum + file.size, 0);
+    const rawSize = rawFiles.reduce((sum, file) => sum + file.size, 0);
+
+    document.getElementById('totalSize').textContent = `总大小: ${formatBytes(totalSize)}`;
+    document.getElementById('jpgSize').textContent = `JPG大小: ${formatBytes(jpgSize)}`;
+    document.getElementById('rawSize').textContent = `RAW大小: ${formatBytes(rawSize)}`;
 }
 
 // 渲染预览
@@ -189,9 +221,7 @@ function renderPreview() {
         previewItem.className = 'preview-item';
         
         // 根据当前预览模式和大小设置样式
-        if (previewSettings.mode === 'grid' || previewSettings.mode === 'square') {
-            previewItem.style.width = `${previewSettings.size}px`;
-        } else if (previewSettings.mode === 'adaptive') {
+        if (previewSettings.mode === 'adaptive') {
             // 自适应模式下，宽度会根据内容自动调整
             previewItem.style.maxWidth = `${previewSettings.size * 1.5}px`;
         }
@@ -227,13 +257,7 @@ function renderPreview() {
             img.src = URL.createObjectURL(previewFile);
             
             // 根据预览模式设置图片样式
-            if (previewSettings.mode === 'grid') {
-                img.style.height = `${previewSettings.size * 0.75}px`;
-                img.style.objectFit = 'cover';
-            } else if (previewSettings.mode === 'square') {
-                img.style.height = `${previewSettings.size}px`;
-                img.style.objectFit = 'cover';
-            } else if (previewSettings.mode === 'adaptive') {
+            if (previewSettings.mode === 'adaptive') {
                 img.style.maxHeight = `${previewSettings.size}px`;
                 img.style.maxWidth = '100%';
                 img.style.objectFit = 'contain';
@@ -248,12 +272,7 @@ function renderPreview() {
             placeholder.textContent = 'RAW';
             
             // 根据预览模式设置占位图样式
-            if (previewSettings.mode === 'grid') {
-                placeholder.style.height = `${previewSettings.size * 0.75}px`;
-            } else if (previewSettings.mode === 'square') {
-                placeholder.style.height = `${previewSettings.size}px`;
-                placeholder.style.width = `${previewSettings.size}px`;
-            } else if (previewSettings.mode === 'adaptive') {
+            if (previewSettings.mode === 'adaptive') {
                 placeholder.style.height = `${previewSettings.size}px`;
                 placeholder.style.minWidth = `${previewSettings.size}px`;
             }
@@ -324,15 +343,13 @@ function updateButtonStates() {
 
 // 下载ZIP
 async function downloadZip(type) {
-    const zip = new JSZip();
     const isTypeMatch = type === 'jpg' ? isJpgFile : isRawFile;
     
     // 获取DOM元素
     const progressContainer = document.getElementById('progressContainer');
     const progressBar = document.getElementById('progressBar');
-    const progressText = document.getElementById('progressText');
-    const progressPercent = document.getElementById('progressPercent');
-    
+
+
     // 获取要处理的文件
     const filesToProcess = allFiles
         .filter(file => selectedFiles.has(file.name) && isTypeMatch(getFileExtension(file.name)));
@@ -341,9 +358,55 @@ async function downloadZip(type) {
         alert(`没有选中的${type.toUpperCase()}文件可下载`);
         return;
     }
+
+    const totalDownloadSize = filesToProcess.reduce((sum, file) => sum + file.size, 0);
+    const ONE_GB = 1024 * 1024 * 1024; // 1 GB
+    const MAX_CHUNK_SIZE = 900 * 1024 * 1024; // 900 MB
+
+    if (totalDownloadSize > ONE_GB) {
+        const confirmSplit = confirm(
+            `下载文件总大小约为 ${formatBytes(totalDownloadSize)}，超过1GB。\n是否拆分为多个不超过900MB的压缩包进行下载？`
+        );
+        if (!confirmSplit) {
+            return; // 用户取消下载
+        }
+
+        // 拆分文件并分批下载
+        let currentChunkSize = 0;
+        let currentChunkFiles = [];
+        let chunkIndex = 1;
+
+        for (const file of filesToProcess) {
+            if (currentChunkSize + file.size > MAX_CHUNK_SIZE && currentChunkFiles.length > 0) {
+                await generateAndDownloadZip(currentChunkFiles, type, chunkIndex, totalDownloadSize, progressContainer, progressBar, progressText, progressPercent);
+                chunkIndex++;
+                currentChunkSize = 0;
+                currentChunkFiles = [];
+            }
+            currentChunkFiles.push(file);
+            currentChunkSize += file.size;
+        }
+
+        // 下载最后一个分块
+        if (currentChunkFiles.length > 0) {
+            await generateAndDownloadZip(currentChunkFiles, type, chunkIndex, totalDownloadSize, progressContainer, progressBar, progressText, progressPercent);
+        }
+
+        return; // 完成分批下载
+    }
+
+    // 如果总大小不超过1GB，则直接下载一个ZIP包
+    await generateAndDownloadZip(filesToProcess, type, null, totalDownloadSize, progressContainer, progressBar, progressText, progressPercent);
+}
+
+// 辅助函数：生成并下载ZIP文件
+async function generateAndDownloadZip(filesToProcess, type, chunkIndex, totalDownloadSize, progressContainer, progressBar, progressText, progressPercent) {
+    const zip = new JSZip();
+    const isTypeMatch = type === 'jpg' ? isJpgFile : isRawFile;
     
     // 显示进度条
     showProgressBar('准备下载...');
+
     
     // 计算总文件大小，用于更准确的进度计算
     const totalSize = filesToProcess.reduce((sum, file) => sum + file.size, 0);
@@ -416,11 +479,13 @@ async function downloadZip(type) {
         baseName = getBaseFilename(firstFile.name);
     }
     
-    // 更新进度条状态
-    updateProgressBar(100, '下载完成！');
-    
     // 组合文件名
-    const zipFilename = `相机照片_${datePrefix}_${baseName ? baseName + '_' : ''}${type.toUpperCase()}.zip`;
+    let zipFilename = `相机照片_${datePrefix}_${baseName ? baseName + '_' : ''}${type.toUpperCase()}`;
+    if (chunkIndex) {
+        zipFilename += `_part${chunkIndex}`;
+    }
+    zipFilename += `.zip`;
+
     saveAs(zipBlob, zipFilename);
     
     // 隐藏进度条
@@ -544,9 +609,7 @@ function renderPreview() {
         previewItem.className = 'preview-item';
         
         // 根据当前预览模式和大小设置样式
-        if (previewSettings.mode === 'grid' || previewSettings.mode === 'square') {
-            previewItem.style.width = `${previewSettings.size}px`;
-        } else if (previewSettings.mode === 'adaptive') {
+        if (previewSettings.mode === 'adaptive') {
             // 自适应模式下，宽度会根据内容自动调整
             previewItem.style.maxWidth = `${previewSettings.size * 1.5}px`;
         }
@@ -582,13 +645,7 @@ function renderPreview() {
             img.src = URL.createObjectURL(previewFile);
             
             // 根据预览模式设置图片样式
-            if (previewSettings.mode === 'grid') {
-                img.style.height = `${previewSettings.size * 0.75}px`;
-                img.style.objectFit = 'cover';
-            } else if (previewSettings.mode === 'square') {
-                img.style.height = `${previewSettings.size}px`;
-                img.style.objectFit = 'cover';
-            } else if (previewSettings.mode === 'adaptive') {
+            if (previewSettings.mode === 'adaptive') {
                 img.style.maxHeight = `${previewSettings.size}px`;
                 img.style.maxWidth = '100%';
                 img.style.objectFit = 'contain';
@@ -675,4 +732,29 @@ function hideProgressBar() {
     setTimeout(() => {
         progressContainer.style.display = 'none';
     }, 1000); // 延迟1秒隐藏，让用户看到100%的状态
+}
+
+// 对文件进行分组，将JPG和对应的RAW文件归类
+function groupFiles(files) {
+    const groups = new Map();
+
+    files.forEach(file => {
+        const baseName = getBaseFilename(file.name);
+        if (!groups.has(baseName)) {
+            groups.set(baseName, []);
+        }
+        groups.get(baseName).push(file);
+    });
+
+    // 确保每个组中JPG文件在前，RAW文件在后
+    return Array.from(groups.values()).map(group => {
+        group.sort((a, b) => {
+            const extA = getFileExtension(a.name).toLowerCase();
+            const extB = getFileExtension(b.name).toLowerCase();
+            if (isJpgFile(extA) && !isJpgFile(extB)) return -1;
+            if (!isJpgFile(extA) && isJpgFile(extB)) return 1;
+            return 0;
+        });
+        return group;
+    });
 }

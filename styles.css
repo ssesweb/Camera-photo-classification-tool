@@ -45,9 +45,11 @@ h2 {
     border-color: #2980b9;
 }
 
-.upload-icon {
+.upload-icon-svg {
+    width: 64px;
+    height: 64px;
     margin-bottom: 15px;
-    color: #3498db;
+    color: #3498db; /* 保持颜色一致 */
 }
 
 .file-label {
@@ -308,11 +310,6 @@ select, input[type="range"] {
 .preview-grid.adaptive .preview-item {
     flex: 0 0 auto;
     margin-bottom: 0;
-}
-
-.preview-grid.square .preview-item img {
-    aspect-ratio: 1 / 1;
-    object-fit: cover;
 }
 
 .preview-grid.adaptive .preview-item img {
