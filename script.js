@@ -10,7 +10,43 @@ function formatBytes(bytes) {
 // 全局变量
 let allFiles = [];
 let selectedFiles = new Set();
+let cropper = null;
 
+// 缓存机制
+function cacheFiles() {
+    const fileData = allFiles.map(file => ({
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        lastModified: file.lastModified
+    }));
+    localStorage.setItem('cachedFiles', JSON.stringify(fileData));
+    localStorage.setItem('cachedSelectedFiles', JSON.stringify(Array.from(selectedFiles)));
+}
+
+function loadCachedFiles() {
+    const cachedFilesData = localStorage.getItem('cachedFiles');
+    const cachedSelectedFilesData = localStorage.getItem('cachedSelectedFiles');
+
+    if (cachedFilesData) {
+        const fileData = JSON.parse(cachedFilesData);
+        // 注意：File对象不能直接从JSON恢复，这里只是恢复文件信息
+        // 实际的文件内容需要用户重新拖入或选择
+        allFiles = fileData.map(data => new File([], data.name, { type: data.type, lastModified: data.lastModified }));
+    }
+
+    if (cachedSelectedFilesData) {
+        selectedFiles = new Set(JSON.parse(cachedSelectedFilesData));
+    }
+    updateFileStats();
+    renderPreview();
+    updateButtonStates();
+}
+
+function clearCache() {
+    localStorage.removeItem('cachedFiles');
+    localStorage.removeItem('cachedSelectedFiles');
+}
 // DOM元素
 const dropArea = document.getElementById('dropArea');
 const fileInput = document.getElementById('fileInput');
@@ -44,11 +80,79 @@ let previewSettings = {
     zoomLevel: 1   // 模态框缩放级别
 };
 
-// 初始化事件监听器
 function initEventListeners() {
-    // 拖拽相关事件
+    // 全选/取消全选按钮
+    document.getElementById('selectAllBtn').addEventListener('click', selectAll);
+    document.getElementById('deselectAllBtn').addEventListener('click', deselectAll);
+
+    // 下载按钮
+    downloadJpgBtn.addEventListener('click', () => downloadZip('jpg'));
+    downloadRawBtn.addEventListener('click', () => downloadZip('raw'));
+
+    // 清空按钮
+    document.getElementById('clearAllBtn').addEventListener('click', clearAll);
+
+    // 裁剪按钮
+    document.getElementById('cropBtn').addEventListener('click', toggleCrop);
+
+    // 模态框关闭按钮
+    closeModal.addEventListener('click', () => {
+        modal.style.display = 'none';
+        if (cropper) {
+            cropper.destroy();
+            cropper = null;
+            document.getElementById('cropBtn').textContent = '裁剪';
+            // 重新启用按钮
+            document.getElementById('zoomInBtn').disabled = false;
+            document.getElementById('zoomOutBtn').disabled = false;
+            document.getElementById('resetZoomBtn').disabled = false;
+        }
+    });
+
+    // 搜索框
+    const searchBox = document.createElement('input');
+    searchBox.placeholder = '输入文件名关键词筛选';
+    searchBox.id = 'searchBox'; // 添加ID方便引用
+    document.querySelector('.preview-header').appendChild(searchBox);
+
+    // 新增筛选函数
+    function filterFilesByName(keyword) {
+        document.querySelectorAll('.preview-item').forEach(item => {
+            const filenameDiv = item.querySelector('.filename');
+            if (filenameDiv) {
+                const match = filenameDiv.textContent.toLowerCase().includes(keyword.toLowerCase());
+                item.style.display = match ? 'block' : 'none';
+            }
+        });
+    }
+
+    searchBox.addEventListener('input', (e) => {
+        filterFilesByName(e.target.value);
+    });
+
+    // 预览模式选择
+    viewModeSelect.addEventListener('change', updatePreviewMode);
+
+    // 预览大小滑块
+    previewSizeSlider.addEventListener('input', updatePreviewSize);
+
+    // 预设大小按钮
+    sizePresetBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            previewSizeSlider.value = btn.dataset.size;
+            updatePreviewSize();
+        });
+    });
+
+    // 缩放按钮
+    zoomInBtn.addEventListener('click', () => zoomImage(1.2));
+    zoomOutBtn.addEventListener('click', () => zoomImage(0.8));
+    resetZoomBtn.addEventListener('click', resetZoom);
+
+    // 拖拽事件监听器
     ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
         dropArea.addEventListener(eventName, preventDefaults, false);
+        document.body.addEventListener(eventName, preventDefaults, false); // 防止拖拽到页面其他地方
     });
 
     ['dragenter', 'dragover'].forEach(eventName => {
@@ -59,53 +163,10 @@ function initEventListeners() {
         dropArea.addEventListener(eventName, unhighlight, false);
     });
 
-    // 处理拖拽文件
     dropArea.addEventListener('drop', handleDrop, false);
-    
-    // 处理文件选择
+
+    // 文件输入改变事件
     fileInput.addEventListener('change', handleFiles, false);
-    
-    // 按钮事件
-    selectAllBtn.addEventListener('click', selectAll);
-    deselectAllBtn.addEventListener('click', deselectAll);
-    downloadJpgBtn.addEventListener('click', () => downloadZip('jpg'));
-    downloadRawBtn.addEventListener('click', () => downloadZip('raw'));
-    clearAllBtn.addEventListener('click', clearAll);
-    
-    // 预览控制事件
-    // viewModeSelect.addEventListener('change', updatePreviewMode);
-    previewSizeSlider.addEventListener('input', updatePreviewSize);
-    
-    // 预览大小预设按钮事件
-    sizePresetBtns.forEach(btn => {
-        btn.addEventListener('click', () => {
-            const ratio = parseFloat(btn.dataset.ratio);
-            // 临时设置预览模式为adaptive以获取正确的宽度基准
-            const originalMode = previewSettings.mode;
-            previewSettings.mode = 'adaptive';
-            previewGrid.classList.remove('square');
-            previewGrid.classList.add('adaptive');
-            // 获取预览网格的当前宽度
-            const previewGridWidth = previewGrid.offsetWidth;
-            // 恢复原始模式
-            previewSettings.mode = originalMode;
-            previewGrid.classList.remove('adaptive');
-            previewGrid.classList.add(originalMode);
-            // 根据比例计算新的预览大小
-            const newSize = Math.round(previewGridWidth * ratio);
-            // 将计算出的值设置到滑块，并确保在滑块的min/max范围内
-            previewSizeSlider.value = Math.max(parseInt(previewSizeSlider.min), Math.min(parseInt(previewSizeSlider.max), newSize));
-            updatePreviewSize();
-        });
-    });
-    
-    // 模态框缩放控制
-    zoomInBtn.addEventListener('click', () => zoomImage(0.1));
-    zoomOutBtn.addEventListener('click', () => zoomImage(-0.1));
-    resetZoomBtn.addEventListener('click', resetZoom);
-    
-    // 模态框关闭事件
-    closeModal.addEventListener('click', () => modal.style.display = "none");
 }
 
 // 阻止默认行为
@@ -133,26 +194,40 @@ function handleDrop(e) {
 
 // 处理文件
 function handleFiles(e) {
-    const fileList = e.target.files;
-    if (!fileList || fileList.length === 0) return;
-    
-    // 转换FileList为数组并添加到全局文件列表
-    const newFiles = Array.from(fileList).filter(file => {
-        // 只接受JPG和RAW文件
-        const ext = getFileExtension(file.name).toLowerCase();
-        return isJpgFile(ext) || isRawFile(ext);
-    });
-    
-    // 添加到全局文件列表
-    allFiles = [...allFiles, ...newFiles];
-    
-    // 默认选中所有文件
-    newFiles.forEach(file => selectedFiles.add(file.name));
-    
-    // 更新UI
-    updateFileStats();
-    renderPreview();
-    updateButtonStates();
+    try {
+        const fileList = e.target.files;
+        if (!fileList || fileList.length === 0) return;
+        
+        // 转换FileList为数组并添加到全局文件列表
+        const newFiles = Array.from(fileList).filter(file => {
+            // 只接受JPG和RAW文件
+            const ext = getFileExtension(file.name).toLowerCase();
+            return isJpgFile(ext) || isRawFile(ext);
+        });
+        
+        if (newFiles.length === 0) {
+            alert('请上传JPG或RAW格式的文件');
+            return;
+        }
+        
+        // 添加到全局文件列表
+        allFiles = [...allFiles, ...newFiles];
+        
+        // 默认选中所有文件
+        newFiles.forEach(file => selectedFiles.add(file.name));
+        
+        // 更新UI
+        updateFileStats();
+        renderPreview();
+        updateButtonStates();
+        cacheFiles(); // 缓存文件状态
+        
+        // 重置文件输入，允许重复上传相同文件
+        e.target.value = '';
+    } catch (error) {
+        console.error('文件上传错误:', error);
+        alert('文件上传失败: ' + error.message);
+    }
 }
 
 // 获取文件扩展名
@@ -162,12 +237,12 @@ function getFileExtension(filename) {
 
 // 判断是否为JPG文件
 function isJpgFile(ext) {
-    return ['jpg', 'jpeg'].includes(ext.toLowerCase());
+    return ['jpg', 'jpeg', 'png', 'webp'].includes(ext.toLowerCase());
 }
 
 // 判断是否为RAW文件
 function isRawFile(ext) {
-    return ['raw', 'cr2', 'nef', 'arw', 'dng', 'orf', 'rw2'].includes(ext.toLowerCase());
+    return ['raw', 'cr2', 'cr3', 'nef', 'arw', 'dng', 'orf', 'rw2'].includes(ext.toLowerCase());
 }
 
 // 获取不带扩展名的文件名
@@ -311,6 +386,11 @@ function showModal(file) {
     modalCaption.textContent = file.name;
     modal.style.display = "block";
     
+    // 销毁之前的裁剪器实例
+    if (cropper) {
+        cropper.destroy();
+    }
+    
     // 重置缩放
     resetZoom();
 }
@@ -348,6 +428,8 @@ async function downloadZip(type) {
     // 获取DOM元素
     const progressContainer = document.getElementById('progressContainer');
     const progressBar = document.getElementById('progressBar');
+    const progressText = document.getElementById('progressText');
+    const progressPercent = document.getElementById('progressPercent');
 
 
     // 获取要处理的文件
@@ -402,7 +484,6 @@ async function downloadZip(type) {
 // 辅助函数：生成并下载ZIP文件
 async function generateAndDownloadZip(filesToProcess, type, chunkIndex, totalDownloadSize, progressContainer, progressBar, progressText, progressPercent) {
     const zip = new JSZip();
-    const isTypeMatch = type === 'jpg' ? isJpgFile : isRawFile;
     
     // 显示进度条
     showProgressBar('准备下载...');
@@ -422,7 +503,7 @@ async function generateAndDownloadZip(filesToProcess, type, chunkIndex, totalDow
     let processedFiles = 0;
     
     // 使用更高效的方式处理文件
-    const chunkSize = 1024 * 1024 * 2; // 2MB 分块处理大文件
+    // const chunkSize = 1024 * 1024 * 2; // 2MB 分块处理大文件
     
     const promises = filesToProcess.map(file => {
         return new Promise((resolve) => {
@@ -491,7 +572,6 @@ async function generateAndDownloadZip(filesToProcess, type, chunkIndex, totalDow
     // 隐藏进度条
     hideProgressBar();
 }
-
 // 清空所有文件和预览
 function clearAll() {
     allFiles = [];
@@ -499,36 +579,17 @@ function clearAll() {
     updateFileStats();
     renderPreview();
     updateButtonStates();
+    clearCache(); // 清空缓存
 }
-
-// 在initEventListeners中添加
-const searchBox = document.createElement('input');
-searchBox.placeholder = '输入文件名关键词筛选';
-document.querySelector('.preview-header').appendChild(searchBox);
-
-// 新增筛选函数
-function filterFilesByName(keyword) {
-  document.querySelectorAll('.preview-item').forEach(item => {
-    const match = item.dataset.filename.includes(keyword);
-    item.style.display = match ? 'block' : 'none';
-  });
-}
-
-// 初始化应用
-function init() {
-    initEventListeners();
-}
-
-// 当页面加载完成后初始化应用
-window.addEventListener('DOMContentLoaded', init);
-
 
 // 显示进度条
 function showProgressBar(message = '准备下载...') {
     progressContainer.style.display = 'block';
     progressBar.style.width = '0%';
-    progressText.textContent = message;
-    progressPercent.textContent = '0%';
+    progressText.textContent = '0%';
+    if (message) {
+        progressText.textContent = message;
+    }
 }
 
 // 更新进度条
@@ -550,14 +611,6 @@ function hideProgressBar() {
 // 更新预览模式
 function updatePreviewMode() {
     previewSettings.mode = viewModeSelect.value;
-    
-    // 移除所有模式类
-    previewGrid.classList.remove('grid', 'adaptive', 'square');
-    
-    // 添加当前模式类
-    previewGrid.classList.add(previewSettings.mode);
-    
-    // 重新渲染预览
     renderPreview();
 }
 
@@ -565,136 +618,21 @@ function updatePreviewMode() {
 function updatePreviewSize() {
     previewSettings.size = parseInt(previewSizeSlider.value);
     previewSizeValue.textContent = `${previewSettings.size}px`;
-    
-    // 更新CSS变量
-    document.documentElement.style.setProperty('--preview-size', `${previewSettings.size}px`);
-    
-    // 重新渲染预览
     renderPreview();
 }
 
-// 缩放模态框图片
-function zoomImage(delta) {
-    previewSettings.zoomLevel += delta;
-    
-    // 限制缩放范围
-    if (previewSettings.zoomLevel < 0.5) previewSettings.zoomLevel = 0.5;
-    if (previewSettings.zoomLevel > 3) previewSettings.zoomLevel = 3;
-    
-    // 应用缩放
-    modalImg.style.transform = `scale(${previewSettings.zoomLevel})`;
+// 缩放图片
+function zoomImage(factor) {
+    if (modalImg.src) {
+        previewSettings.zoomLevel = Math.max(0.1, previewSettings.zoomLevel * factor);
+        modalImg.style.transform = `scale(${previewSettings.zoomLevel})`;
+    }
 }
 
 // 重置缩放
 function resetZoom() {
     previewSettings.zoomLevel = 1;
-    modalImg.style.transform = 'scale(1)';
-}
-
-// 渲染预览
-function renderPreview() {
-    // 清空预览区域
-    previewGrid.innerHTML = '';
-    
-    // 对文件进行分组
-    const fileGroups = groupFiles(allFiles);
-    
-    // 渲染每个文件
-    fileGroups.forEach(group => {
-        // 找出组中的JPG文件用于预览
-        const previewFile = group.find(file => isJpgFile(getFileExtension(file.name))) || group[0];
-        
-        // 创建预览项
-        const previewItem = document.createElement('div');
-        previewItem.className = 'preview-item';
-        
-        // 根据当前预览模式和大小设置样式
-        if (previewSettings.mode === 'adaptive') {
-            // 自适应模式下，宽度会根据内容自动调整
-            previewItem.style.maxWidth = `${previewSettings.size * 1.5}px`;
-        }
-        
-        // 如果是成对的文件，添加指示器
-        if (group.length > 1) {
-            const pairIndicator = document.createElement('div');
-            pairIndicator.className = 'pair-indicator';
-            pairIndicator.textContent = '成对';
-            previewItem.appendChild(pairIndicator);
-        }
-        
-        // 添加复选框
-        const checkbox = document.createElement('input');
-        checkbox.type = 'checkbox';
-        checkbox.className = 'checkbox';
-        checkbox.checked = group.some(file => selectedFiles.has(file.name));
-        checkbox.addEventListener('change', () => {
-            group.forEach(file => {
-                if (checkbox.checked) {
-                    selectedFiles.add(file.name);
-                } else {
-                    selectedFiles.delete(file.name);
-                }
-            });
-            updateButtonStates();
-        });
-        previewItem.appendChild(checkbox);
-        
-        // 创建预览图
-        if (isJpgFile(getFileExtension(previewFile.name))) {
-            const img = document.createElement('img');
-            img.src = URL.createObjectURL(previewFile);
-            
-            // 根据预览模式设置图片样式
-            if (previewSettings.mode === 'adaptive') {
-                img.style.maxHeight = `${previewSettings.size}px`;
-                img.style.maxWidth = '100%';
-                img.style.objectFit = 'contain';
-            }
-            
-            img.addEventListener('click', () => showModal(previewFile));
-            previewItem.appendChild(img);
-        } else {
-            // 对于RAW文件，显示占位图
-            const placeholder = document.createElement('div');
-            placeholder.className = 'raw-placeholder';
-            placeholder.textContent = 'RAW';
-            placeholder.style.height = '150px';
-            placeholder.style.display = 'flex';
-            placeholder.style.alignItems = 'center';
-            placeholder.style.justifyContent = 'center';
-            placeholder.style.backgroundColor = '#f1f1f1';
-            placeholder.style.color = '#666';
-            placeholder.style.fontSize = '24px';
-            previewItem.appendChild(placeholder);
-        }
-        
-        // 添加文件信息
-        const info = document.createElement('div');
-        info.className = 'info';
-        
-        const filename = document.createElement('div');
-        filename.className = 'filename';
-        filename.textContent = previewFile.name;
-        info.appendChild(filename);
-        
-        const type = document.createElement('div');
-        type.className = 'type';
-        type.textContent = isJpgFile(getFileExtension(previewFile.name)) ? 'JPG' : 'RAW';
-        info.appendChild(type);
-        
-        previewItem.appendChild(info);
-        previewGrid.appendChild(previewItem);
-    });
-}
-
-// 显示模态框
-function showModal(file) {
-    modalImg.src = URL.createObjectURL(file);
-    modalCaption.textContent = file.name;
-    modal.style.display = "block";
-    
-    // 重置缩放
-    resetZoom();
+    modalImg.style.transform = `scale(${previewSettings.zoomLevel})`;
 }
 
 // 初始化应用
@@ -704,35 +642,11 @@ function init() {
     // 初始化预览设置
     updatePreviewMode();
     updatePreviewSize();
+    loadCachedFiles(); // 加载缓存的文件状态
 }
 
 // 当页面加载完成后初始化应用
 window.addEventListener('DOMContentLoaded', init);
-
-
-// 显示进度条
-function showProgressBar(message = '准备下载...') {
-    progressContainer.style.display = 'block';
-    progressBar.style.width = '0%';
-    progressText.textContent = message;
-    progressPercent.textContent = '0%';
-}
-
-// 更新进度条
-function updateProgressBar(percent, message) {
-    progressBar.style.width = `${percent}%`;
-    progressPercent.textContent = `${Math.round(percent)}%`;
-    if (message) {
-        progressText.textContent = message;
-    }
-}
-
-// 隐藏进度条
-function hideProgressBar() {
-    setTimeout(() => {
-        progressContainer.style.display = 'none';
-    }, 1000); // 延迟1秒隐藏，让用户看到100%的状态
-}
 
 // 对文件进行分组，将JPG和对应的RAW文件归类
 function groupFiles(files) {
@@ -757,4 +671,85 @@ function groupFiles(files) {
         });
         return group;
     });
+}
+
+// 关闭模态框时清理裁剪器
+closeModal.addEventListener('click', () => {
+    modal.style.display = "none";
+    if (cropper) {
+        cropper.destroy();
+        cropper = null;
+        document.getElementById('cropBtn').textContent = '裁剪';
+        // 重新启用按钮
+        document.getElementById('zoomInBtn').disabled = false;
+        document.getElementById('zoomOutBtn').disabled = false;
+        document.getElementById('resetZoomBtn').disabled = false;
+    }
+});
+
+// 切换裁剪模式
+function toggleCrop() {
+    const cropBtn = document.getElementById('cropBtn');
+    const zoomInBtn = document.getElementById('zoomInBtn');
+    const zoomOutBtn = document.getElementById('zoomOutBtn'); 
+    const resetZoomBtn = document.getElementById('resetZoomBtn');
+    
+    if (cropper) {
+        // 如果裁剪器已经存在，则应用裁剪并销毁实例
+        const canvas = cropper.getCroppedCanvas();
+        if (canvas) {
+            canvas.toBlob(async (blob) => {
+                const croppedFile = new File([blob], modalCaption.textContent, {
+                    type: 'image/jpeg',
+                    lastModified: Date.now()
+                });
+                
+                // 释放之前的URL对象
+                URL.revokeObjectURL(modalImg.src);
+                
+                // 更新预览图
+                modalImg.src = URL.createObjectURL(croppedFile);
+                
+                // 更新文件列表中的文件
+                const fileIndex = allFiles.findIndex(f => f.name === modalCaption.textContent);
+                if (fileIndex !== -1) {
+                    allFiles[fileIndex] = croppedFile;
+                    await renderPreview();
+                }
+            }, 'image/jpeg', 0.95); // 设置较高的图片质量
+        }
+        
+        // 清理裁剪器
+        cropper.destroy();
+        cropper = null;
+        cropBtn.textContent = '裁剪';
+        
+        // 重新启用缩放按钮
+        [zoomInBtn, zoomOutBtn, resetZoomBtn].forEach(btn => btn.disabled = false);
+        
+    } else {
+        // 创建新的裁剪器实例
+        cropper = new Cropper(modalImg, {
+            aspectRatio: NaN,
+            viewMode: 2,
+            background: true,
+            modal: true,
+            zoomable: false,
+            cropBoxResizable: true,
+            cropBoxMovable: true,
+            dragMode: 'move',
+            autoCropArea: 0.8, // 初始裁剪框大小
+            responsive: true,
+            restore: true,
+            center: true,
+            highlight: false,
+            guides: true,
+            movable: true
+        });
+        
+        cropBtn.textContent = '完成';
+        
+        // 禁用缩放按钮
+        [zoomInBtn, zoomOutBtn, resetZoomBtn].forEach(btn => btn.disabled = true);
+    }
 }

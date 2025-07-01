@@ -325,16 +325,49 @@ select, input[type="range"] {
     left: 15px;
     display: flex;
     gap: 10px;
+    margin-bottom: 10px;
 }
 
 .modal-controls button {
-    background-color: rgba(0, 0, 0, 0.5);
+    padding: 8px 16px;
+    background-color: #007bff;
     color: white;
     border: none;
-    padding: 8px 12px;
-    border-radius: 5px;
+    border-radius: 4px;
     cursor: pointer;
     transition: background-color 0.3s;
+}
+
+.modal-controls button:hover {
+    background-color: #0056b3;
+}
+
+.modal-controls button:disabled {
+    background-color: #ccc;
+    cursor: not-allowed;
+}
+
+/* Cropper.js 自定义样式 */
+.cropper-container {
+    margin: auto;
+}
+
+.cropper-view-box,
+.cropper-face {
+    border-radius: 0;
+}
+
+.cropper-line,
+.cropper-point {
+    background-color: #007bff;
+}
+
+.cropper-bg {
+    background-image: none;
+}
+
+.cropper-modal {
+    background-color: rgba(0, 0, 0, 0.6);
 }
 
 .modal-controls button:hover {

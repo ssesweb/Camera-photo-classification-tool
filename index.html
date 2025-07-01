@@ -21,7 +21,7 @@
                 <img src="camera-sd-card.svg" alt="上传图标" class="upload-icon-svg">
             </div>
             <p>拖拽照片到这里或<label for="fileInput" class="file-label">选择文件</label></p>
-            <input type="file" id="fileInput" multiple accept=".jpg,.jpeg,.cr2,.cr3,.nef,.arw,.raf,.orf,.rw2,.raw" style="display:none">
+            <input type="file" id="fileInput" multiple accept=".jpg,.jpeg,.png,.webp,.cr2,.cr3,.nef,.arw,.raf,.orf,.rw2,.raw" style="display:none">
         </div>
 
         <div class="controls">
@@ -84,11 +84,14 @@
             <button id="zoomInBtn">放大</button>
             <button id="zoomOutBtn">缩小</button>
             <button id="resetZoomBtn">重置</button>
+            <button id="cropBtn">裁剪</button>
         </div>
         <img class="modal-content" id="modalImage">
         <div id="modalCaption"></div>
     </div>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
     <script src="script.js"></script>
